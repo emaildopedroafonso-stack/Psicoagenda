@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
-import { BrainCircuit, Lock, Mail, Chrome } from 'lucide-react';
+import { BrainCircuit, Lock, Mail } from 'lucide-react';
 
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  
   const { login, loginWithGoogle } = useAppContext();
   const navigate = useNavigate();
 
@@ -24,7 +25,7 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-600 to-slate-900 p-4">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md">
+      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md my-4 max-h-[90vh] overflow-y-auto">
         <div className="flex flex-col items-center mb-8">
           <div className="bg-teal-100 p-3 rounded-full mb-4">
             <BrainCircuit className="text-teal-600" size={40} />
@@ -102,15 +103,6 @@ const Login = () => {
             </svg>
             Entrar com Google
         </button>
-        
-        <div className="mt-6 text-center text-xs text-slate-400">
-          <p>Ambiente Seguro. Criptografia de ponta a ponta simulada.</p>
-          <div className="mt-2 p-2 bg-slate-50 rounded border border-slate-100 inline-block text-left">
-             <p className="font-bold">Conta de Teste:</p>
-             <p>Login: teste@teste.com</p>
-             <p>Senha: 123456</p>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -8,12 +8,14 @@ export const generateFinancialInsight = async (
   absentCount: number
 ): Promise<string> => {
   try {
-    // Safety check for API key presence, although prompt says assume valid.
-    if (!process.env.API_KEY) {
-      return "Chave de API não configurada. Não é possível gerar insights.";
+    // Chave obtida exclusivamente via variável de ambiente, conforme solicitado.
+    const apiKey = process.env.API_KEY;
+
+    if (!apiKey) {
+      return "Chave de API não configurada no ambiente.";
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     
     const prompt = `
       Você é um assistente financeiro para um psicólogo. Analise os dados deste mês (${month}):
