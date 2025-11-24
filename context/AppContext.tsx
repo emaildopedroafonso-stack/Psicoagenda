@@ -7,6 +7,8 @@ interface AppContextType {
   login: (email: string, password?: string) => void;
   loginWithGoogle: () => void;
   logout: () => void;
+  sendVerificationCode: (contact: string) => Promise<boolean>;
+  verifyAndRegister: (code: string, userData: { name: string; contact: string; type: 'EMAIL' | 'PHONE' }) => Promise<boolean>;
   patients: Patient[];
   sessions: Session[];
   addPatient: (patient: Omit<Patient, 'id'>) => void;
@@ -183,6 +185,48 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
     localStorage.removeItem(STORAGE_KEY_USER);
   };
 
+  // --- Funções de Cadastro Simulado ---
+
+  const sendVerificationCode = async (contact: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        // Em um app real, aqui chamaria a API para enviar SMS ou Email
+        // Como é uma demo, mostramos um alerta com o código
+        const mockCode = "123456";
+        alert(`[SIMULAÇÃO] Seu código de verificação para ${contact} é: ${mockCode}`);
+        resolve(true);
+      }, 1500);
+    });
+  };
+
+  const verifyAndRegister = async (code: string, userData: { name: string; contact: string; type: 'EMAIL' | 'PHONE' }): Promise<boolean> => {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (code === "123456") {
+                const newUser: User = {
+                    id: crypto.randomUUID(),
+                    name: userData.name,
+                    email: userData.type === 'EMAIL' ? userData.contact : undefined,
+                    phone: userData.type === 'PHONE' ? userData.contact : undefined
+                };
+                
+                setUser(newUser);
+                localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
+                
+                // Inicializa com dados vazios para novo usuário
+                setPatients([]);
+                setSessions([]);
+                
+                resolve(true);
+            } else {
+                resolve(false);
+            }
+        }, 1000);
+    });
+  };
+
+  // ------------------------------------
+
   const addPatient = (patientData: Omit<Patient, 'id'>) => {
     const newPatient: Patient = { ...patientData, id: crypto.randomUUID() };
     setPatients(prev => [...prev, newPatient]);
@@ -262,7 +306,6 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
 
   const syncGoogleCalendar = () => {
     // Simulate fetching from Google Calendar API
-    // We will generate events for the current week
     const today = new Date();
     const startOfWeekDate = startOfWeek(today);
     const mockEvents = [];
@@ -316,6 +359,7 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
   return (
     <AppContext.Provider value={{ 
       user, login, loginWithGoogle, logout, 
+      sendVerificationCode, verifyAndRegister,
       patients, sessions, 
       addPatient, updatePatient, 
       addSession, updateSession, removeSession,

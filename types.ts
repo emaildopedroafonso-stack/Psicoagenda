@@ -31,7 +31,7 @@ export interface Patient {
   dayOfWeek?: number; // 0 (Sunday) - 6 (Saturday)
   status: PatientStatus;
   notes?: string;
-  requiresReceipt?: boolean; // Novo campo para controle de recibo
+  requiresReceipt?: boolean;
 }
 
 export interface Session {
@@ -48,7 +48,8 @@ export interface Session {
 export interface User {
   id: string;
   name: string;
-  email: string;
+  email?: string;
+  phone?: string;
   avatarUrl?: string;
 }
 
