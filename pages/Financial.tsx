@@ -3,7 +3,7 @@ import { useAppContext } from '../context/AppContext';
 import { format, isSameMonth, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { SessionStatus } from '../types';
-import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, FileText } from 'lucide-react';
 
 const Financial = () => {
   const { sessions, patients, updateSession } = useAppContext();
@@ -18,10 +18,12 @@ const Financial = () => {
   // Group by patient
   const financialData = useMemo(() => {
     const data: Record<string, { 
+      patientId: string,
       patientName: string, 
+      requiresReceipt: boolean,
       sessions: typeof sessions, 
       total: number, 
-      paid: number,
+      paid: number, 
       pending: number 
     }> = {};
 
@@ -34,7 +36,9 @@ const Financial = () => {
         const p = patients.find(pat => pat.id === session.patientId);
         if (!p) return;
         data[session.patientId] = {
+          patientId: p.id,
           patientName: p.name,
+          requiresReceipt: p.requiresReceipt || false,
           sessions: [],
           total: 0,
           paid: 0,
@@ -100,7 +104,7 @@ const Financial = () => {
 
       <div className="space-y-4">
         {financialData.map((record) => (
-          <div key={record.patientName} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div key={record.patientId} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center flex-wrap gap-2">
               <div className="flex items-center gap-3">
                 <h3 className="font-bold text-slate-700">{record.patientName}</h3>
@@ -109,6 +113,11 @@ const Financial = () => {
                 )}
                 {record.pending > 0 && (
                    <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-bold">Pendente</span>
+                )}
+                {record.requiresReceipt && record.paid > 0 && (
+                  <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-indigo-100">
+                    <FileText size={12} /> Recibo Necessário
+                  </span>
                 )}
               </div>
               <div className="text-sm">

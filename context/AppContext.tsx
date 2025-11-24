@@ -81,7 +81,8 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
         periodicity: isBiweekly ? Periodicity.BIWEEKLY : Periodicity.WEEKLY,
         dayOfWeek: dayOfWeek,
         status: PatientStatus.ACTIVE,
-        notes: `Paciente iniciou terapia em ${startYear}. Queixa principal: Ansiedade e estresse no trabalho.`
+        notes: `Paciente iniciou terapia em ${startYear}. Queixa principal: Ansiedade e estresse no trabalho.`,
+        requiresReceipt: Math.random() > 0.5 // 50% chance of needing receipt
       };
     });
 

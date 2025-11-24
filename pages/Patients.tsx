@@ -18,7 +18,8 @@ const PatientFormModal = ({ isOpen, onClose, patient = null }: { isOpen: boolean
     periodicity: Periodicity.WEEKLY,
     dayOfWeek: 1,
     status: PatientStatus.ACTIVE,
-    notes: ''
+    notes: '',
+    requiresReceipt: false
   });
 
   useEffect(() => {
@@ -34,7 +35,8 @@ const PatientFormModal = ({ isOpen, onClose, patient = null }: { isOpen: boolean
         periodicity: Periodicity.WEEKLY,
         dayOfWeek: 1,
         status: PatientStatus.ACTIVE,
-        notes: ''
+        notes: '',
+        requiresReceipt: false
       });
     }
   }, [patient, isOpen]);
@@ -134,6 +136,24 @@ const PatientFormModal = ({ isOpen, onClose, patient = null }: { isOpen: boolean
                 </select>
               </div>
             )}
+
+            {/* Novo Campo: Recibo */}
+            <div className="col-span-1 md:col-span-2 bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between mt-2">
+                <div>
+                    <label className="font-medium text-slate-700 block">Emitir Recibo?</label>
+                    <span className="text-xs text-slate-500">Lembrar de gerar recibo mensalmente</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                        type="checkbox" 
+                        className="sr-only peer" 
+                        checked={formData.requiresReceipt || false}
+                        onChange={(e) => setFormData({...formData, requiresReceipt: e.target.checked})}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-teal-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+                </label>
+            </div>
+
           </div>
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
             <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
@@ -208,16 +228,21 @@ const PatientDetailsModal = ({ isOpen, onClose, patient }: { isOpen: boolean; on
         {/* Header */}
         <div className="bg-slate-900 text-white p-6 flex justify-between items-start shrink-0">
             <div>
-                <h2 className="text-2xl font-bold flex items-center gap-2">
-                    {patient.name}
+                <div className="flex items-center gap-3 mb-2">
+                    <h2 className="text-2xl font-bold">{patient.name}</h2>
                     <span className={`text-xs px-2 py-1 rounded-full border ${
                         patient.status === PatientStatus.ACTIVE ? 'border-green-400 text-green-400' : 'border-amber-400 text-amber-400'
                     }`}>
                         {patient.status === PatientStatus.ACTIVE ? 'Ativo' : 'Pausado'}
                     </span>
-                </h2>
+                    {patient.requiresReceipt && (
+                        <span className="text-xs px-2 py-1 rounded-full bg-indigo-500/20 border border-indigo-400 text-indigo-300 flex items-center gap-1">
+                            <FileText size={10} /> Com Recibo
+                        </span>
+                    )}
+                </div>
                 {/* Exibição de Telefone e E-mail no Header do Modal */}
-                <div className="text-slate-400 text-sm mt-2 flex flex-wrap gap-x-6 gap-y-2">
+                <div className="text-slate-400 text-sm flex flex-wrap gap-x-6 gap-y-2">
                     <span className="flex items-center gap-1.5"><Phone size={14} className="text-teal-400"/> {patient.phone || 'Sem telefone'}</span>
                     <span className="flex items-center gap-1.5"><Mail size={14} className="text-teal-400"/> {patient.email || 'Sem e-mail'}</span>
                     <span className="flex items-center gap-1.5"><DollarSign size={14} className="text-teal-400"/> R$ {patient.valuePerSession}</span>
@@ -383,7 +408,7 @@ const PatientDetailsModal = ({ isOpen, onClose, patient }: { isOpen: boolean; on
                             )}
                         </div>
                         <textarea
-                            className="flex-1 w-full p-4 resize-none outline-none text-slate-700 text-sm leading-relaxed min-h-[250px]"
+                            className="flex-1 w-full p-4 resize-none outline-none bg-white text-slate-800 text-base leading-relaxed min-h-[250px]"
                             placeholder="Escreva aqui observações sobre a evolução do paciente, pontos importantes das sessões ou lembretes..."
                             value={notes}
                             onChange={(e) => {
@@ -518,6 +543,12 @@ const Patients = () => {
                    {patient.dayOfWeek !== undefined && ` • ${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][patient.dayOfWeek]}`}
                 </span>
               </div>
+              {patient.requiresReceipt && (
+                  <div className="flex items-center gap-2 text-indigo-600 font-medium text-xs">
+                      <FileText size={14} />
+                      Emissão de Recibo Obrigatória
+                  </div>
+              )}
               <div className="font-medium text-slate-800 pt-2 flex items-center justify-between">
                 <span>R$ {patient.valuePerSession.toFixed(2)} / sessão</span>
                 <span className="text-xs text-teal-600 font-normal">Ver prontuário →</span>
