@@ -1,11 +1,35 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Patient, Session, User, PatientStatus, Periodicity, SessionStatus } from '../types';
-import { startOfMonth, endOfMonth, eachDayOfInterval, getDay, format, setHours, setMinutes, isBefore, isAfter, addDays, startOfWeek } from 'date-fns';
+import { startOfMonth, endOfMonth, eachDayOfInterval, getDay, format, setHours, setMinutes, isBefore, addDays, startOfWeek } from 'date-fns';
+import { 
+  auth, 
+  googleProvider, 
+  db 
+} from '../services/firebase';
+import { 
+  signInWithPopup, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  updateProfile
+} from 'firebase/auth';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc,
+  setDoc
+} from 'firebase/firestore';
 
 interface AppContextType {
   user: User | null;
-  login: (email: string, password?: string) => void;
-  loginWithGoogle: () => void;
+  login: (email: string, password?: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => void;
   sendVerificationCode: (contact: string) => Promise<boolean>;
   verifyAndRegister: (code: string, userData: { name: string; contact: string; type: 'EMAIL' | 'PHONE' }) => Promise<boolean>;
@@ -23,271 +47,346 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Mock Data persistence helper
-const STORAGE_KEY_PATIENTS = 'psico_agenda_patients';
-const STORAGE_KEY_SESSIONS = 'psico_agenda_sessions';
-const STORAGE_KEY_USER = 'psico_agenda_user';
+// Helper para Demo Mode (Local)
+const STORAGE_KEY_PATIENTS_DEMO = 'psico_agenda_patients_demo';
+const STORAGE_KEY_SESSIONS_DEMO = 'psico_agenda_sessions_demo';
 
 export const AppProvider = ({ children }: { children?: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
+  // 1. Observer de Autenticação do Firebase
   useEffect(() => {
-    // Load from local storage on mount
-    const storedUser = localStorage.getItem(STORAGE_KEY_USER);
-    const storedPatients = localStorage.getItem(STORAGE_KEY_PATIENTS);
-    const storedSessions = localStorage.getItem(STORAGE_KEY_SESSIONS);
-
-    if (storedUser) setUser(JSON.parse(storedUser));
-    if (storedPatients) setPatients(JSON.parse(storedPatients));
-    if (storedSessions) setSessions(JSON.parse(storedSessions));
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    if (!loading) {
-      localStorage.setItem(STORAGE_KEY_PATIENTS, JSON.stringify(patients));
-      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(sessions));
+    // Check if auth service is available (it might be undefined if keys are missing)
+    if (!auth) {
+      console.log("Firebase Auth not initialized. App will default to signed-out state.");
+      setLoading(false);
+      return;
     }
-  }, [patients, sessions, loading]);
 
-  const generateDemoData = () => {
-    const firstNames = [
-      "Ana", "Bruno", "Carla", "Daniel", "Eduarda", "Felipe", "Gabriela", "Hugo", 
-      "Isabela", "João", "Karina", "Lucas", "Mariana", "Nicolas", "Olivia", 
-      "Pedro", "Quintino", "Rafaela", "Samuel", "Tatiana"
-    ];
-    const lastNames = [
-      "Silva", "Santos", "Oliveira", "Souza", "Rodrigues", "Ferreira", "Alves", 
-      "Pereira", "Lima", "Gomes", "Costa", "Ribeiro", "Martins", "Carvalho", 
-      "Almeida", "Lopes", "Soares", "Fernandes", "Vieira", "Barbosa"
-    ];
-
-    const demoPatients: Patient[] = firstNames.map((name, index) => {
-      const isBiweekly = index < 3; // First 3 are biweekly
-      const lastName = lastNames[index];
-      const fullName = `${name} ${lastName}`;
-      const baseValue = 150 + Math.floor(Math.random() * 11) * 10; // 150 to 250 step 10
-      const dayOfWeek = (index % 5) + 1; // 1 (Mon) to 5 (Fri)
-      const startYear = 2020 + Math.floor(Math.random() * 4);
-      
-      return {
-        id: crypto.randomUUID(),
-        name: fullName,
-        email: `${name.toLowerCase()}.${lastName.toLowerCase()}@exemplo.com`,
-        phone: `(11) 9${Math.floor(Math.random()*10000)}-${Math.floor(Math.random()*10000)}`,
-        birthDate: `${1970 + Math.floor(Math.random() * 30)}-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
-        valuePerSession: baseValue,
-        periodicity: isBiweekly ? Periodicity.BIWEEKLY : Periodicity.WEEKLY,
-        dayOfWeek: dayOfWeek,
-        status: PatientStatus.ACTIVE,
-        notes: `Paciente iniciou terapia em ${startYear}. Queixa principal: Ansiedade e estresse no trabalho.`,
-        requiresReceipt: Math.random() > 0.5 // 50% chance of needing receipt
-      };
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        // Usuário logado via Firebase
+        const appUser: User = {
+          id: firebaseUser.uid,
+          name: firebaseUser.displayName || 'Doutor(a)',
+          email: firebaseUser.email || undefined,
+          avatarUrl: firebaseUser.photoURL || undefined
+        };
+        setUser(appUser);
+        setIsDemoMode(false);
+      } else {
+        // Se não houver user Firebase, verifica se estamos no modo demo manual
+        if (!isDemoMode) {
+            setUser(null);
+            setPatients([]);
+            setSessions([]);
+        }
+      }
+      setLoading(false);
     });
 
-    // Generate sessions for the current month based on these patients
-    const today = new Date();
-    const start = startOfMonth(today);
-    const end = endOfMonth(today);
-    const daysInMonth = eachDayOfInterval({ start, end });
-    const demoSessions: Session[] = [];
+    return () => unsubscribe();
+  }, [isDemoMode]);
 
-    demoPatients.forEach(patient => {
+  // 2. Observer de Dados (Firestore ou LocalStorage Demo)
+  useEffect(() => {
+    if (!user) return;
+
+    if (isDemoMode) {
+      // --- Lógica Demo (LocalStorage) ---
+      const storedPatients = localStorage.getItem(STORAGE_KEY_PATIENTS_DEMO);
+      const storedSessions = localStorage.getItem(STORAGE_KEY_SESSIONS_DEMO);
+      if (storedPatients) setPatients(JSON.parse(storedPatients));
+      if (storedSessions) setSessions(JSON.parse(storedSessions));
+    } else {
+      // --- Lógica Real (Firestore) ---
+      if (!db) {
+         console.warn("Firestore not available.");
+         return;
+      }
+
+      // Listener de Pacientes
+      const qPatients = query(collection(db, "patients"), where("userId", "==", user.id));
+      const unsubPatients = onSnapshot(qPatients, (snapshot) => {
+        const loadedPatients = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Patient[];
+        setPatients(loadedPatients);
+      });
+
+      // Listener de Sessões
+      const qSessions = query(collection(db, "sessions"), where("userId", "==", user.id));
+      const unsubSessions = onSnapshot(qSessions, (snapshot) => {
+        const loadedSessions = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Session[];
+        setSessions(loadedSessions);
+      });
+
+      return () => {
+        unsubPatients();
+        unsubSessions();
+      };
+    }
+  }, [user, isDemoMode]);
+
+  // Salva dados Demo no LocalStorage quando mudam
+  useEffect(() => {
+    if (isDemoMode && !loading) {
+      localStorage.setItem(STORAGE_KEY_PATIENTS_DEMO, JSON.stringify(patients));
+      localStorage.setItem(STORAGE_KEY_SESSIONS_DEMO, JSON.stringify(sessions));
+    }
+  }, [patients, sessions, loading, isDemoMode]);
+
+  // --- Helpers de Demo ---
+  const generateDemoData = () => {
+      const firstNames = ["Ana", "Bruno", "Carla", "Daniel", "Eduarda", "Felipe", "Gabriela", "Hugo", "Isabela", "João", "Karina", "Lucas", "Mariana", "Nicolas", "Olivia", "Pedro", "Quintino", "Rafaela", "Samuel", "Tatiana"];
+      const lastNames = ["Silva", "Santos", "Oliveira", "Souza", "Rodrigues", "Ferreira", "Alves", "Pereira", "Lima", "Gomes", "Costa", "Ribeiro", "Martins", "Carvalho", "Almeida", "Lopes", "Soares", "Fernandes", "Vieira", "Barbosa"];
+
+      const demoPatients: Patient[] = firstNames.map((name, index) => {
+        const isBiweekly = index < 3;
+        const baseValue = 150 + Math.floor(Math.random() * 11) * 10;
+        const dayOfWeek = (index % 5) + 1;
+        
+        return {
+          id: crypto.randomUUID(),
+          name: `${name} ${lastNames[index]}`,
+          email: `${name.toLowerCase()}@exemplo.com`,
+          phone: `(11) 9${Math.floor(Math.random()*10000)}-${Math.floor(Math.random()*10000)}`,
+          birthDate: '1990-01-01',
+          valuePerSession: baseValue,
+          periodicity: isBiweekly ? Periodicity.BIWEEKLY : Periodicity.WEEKLY,
+          dayOfWeek: dayOfWeek,
+          status: PatientStatus.ACTIVE,
+          notes: `Paciente Demo.`,
+          requiresReceipt: Math.random() > 0.5
+        };
+      });
+
+      const today = new Date();
+      const start = startOfMonth(today);
+      const end = endOfMonth(today);
+      const daysInMonth = eachDayOfInterval({ start, end });
+      const demoSessions: Session[] = [];
+
+      demoPatients.forEach(patient => {
+        const patientDays = daysInMonth.filter(day => getDay(day) === patient.dayOfWeek);
+        patientDays.forEach((day, index) => {
+          let shouldSchedule = false;
+          if (patient.periodicity === Periodicity.WEEKLY) shouldSchedule = true;
+          if (patient.periodicity === Periodicity.BIWEEKLY) shouldSchedule = index % 2 === 0;
+
+          if (shouldSchedule) {
+            const sessionDate = setMinutes(setHours(day, 9 + (index % 8)), 0);
+            const isPast = isBefore(sessionDate, today);
+            let status = SessionStatus.SCHEDULED;
+            let paid = false;
+
+            if (isPast) {
+              const rand = Math.random();
+              if (rand > 0.2) status = SessionStatus.COMPLETED;
+              else if (rand > 0.1) status = SessionStatus.PATIENT_ABSENT;
+              else status = SessionStatus.CANCELLED;
+
+              if (status === SessionStatus.COMPLETED && Math.random() > 0.3) paid = true;
+            }
+
+            demoSessions.push({
+              id: crypto.randomUUID(),
+              patientId: patient.id,
+              date: sessionDate.toISOString(),
+              status: status,
+              paid: paid,
+              valueSnapshot: patient.valuePerSession
+            });
+          }
+        });
+      });
+
+      return { demoPatients, demoSessions };
+  };
+
+  // --- Ações de Auth ---
+
+  const login = async (email: string, password?: string) => {
+    // Demo Bypass
+    if (email === 'teste@teste.com' && password === '123456') {
+      setIsDemoMode(true);
+      const { demoPatients, demoSessions } = generateDemoData();
+      setUser({ id: 'demo-user', name: 'Dr. Demonstração', email });
+      setPatients(demoPatients);
+      setSessions(demoSessions);
+      return;
+    }
+
+    // Firebase Auth
+    if (!password) throw new Error("Senha necessária");
+    
+    if (!auth) throw new Error("Serviço de autenticação não configurado.");
+
+    try {
+        await signInWithEmailAndPassword(auth, email, password);
+    } catch (error: any) {
+        throw new Error(error.message);
+    }
+  };
+
+  const loginWithGoogle = async () => {
+    if (!auth) throw new Error("Serviço de autenticação não configurado.");
+    try {
+        await signInWithPopup(auth, googleProvider);
+    } catch (error: any) {
+        console.error("Erro Login Google", error);
+        throw new Error("Erro ao conectar com Google: " + error.message);
+    }
+  };
+
+  const logout = () => {
+    if (isDemoMode) {
+        setIsDemoMode(false);
+        setUser(null);
+    } else {
+        if (auth) signOut(auth);
+    }
+  };
+
+  const sendVerificationCode = async (contact: string): Promise<boolean> => {
+    // Simulação para o fluxo de cadastro
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const mockCode = "123456";
+        alert(`[SIMULAÇÃO FIREBASE] Código enviado para ${contact}: ${mockCode}`);
+        resolve(true);
+      }, 1000);
+    });
+  };
+
+  const verifyAndRegister = async (code: string, userData: { name: string; contact: string; type: 'EMAIL' | 'PHONE' }): Promise<boolean> => {
+    if (code !== "123456") return false;
+
+    // Criar usuário no Firebase
+    if (userData.type === 'EMAIL') {
+        try {
+            if (!auth) throw new Error("Serviço de autenticação não configurado.");
+            // Cria usuário com senha padrão temporária para este fluxo simplificado
+            const userCredential = await createUserWithEmailAndPassword(auth, userData.contact, "123456");
+            await updateProfile(userCredential.user, { displayName: userData.name });
+            return true;
+        } catch (e) {
+            console.error(e);
+            return false;
+        }
+    }
+    return true; 
+  };
+
+  // --- CRUD (Firestore ou Demo) ---
+
+  const addPatient = async (patientData: Omit<Patient, 'id'>) => {
+    if (isDemoMode) {
+      const newPatient = { ...patientData, id: crypto.randomUUID() };
+      setPatients(prev => [...prev, newPatient]);
+      return;
+    }
+
+    if (!user || !db) return;
+    try {
+        await addDoc(collection(db, 'patients'), {
+            ...patientData,
+            userId: user.id
+        });
+    } catch (e) {
+        console.error("Erro ao adicionar paciente", e);
+    }
+  };
+
+  const updatePatient = async (patient: Patient) => {
+    if (isDemoMode) {
+      setPatients(prev => prev.map(p => p.id === patient.id ? patient : p));
+      return;
+    }
+    if (!db) return;
+    try {
+        const { id, ...data } = patient;
+        await updateDoc(doc(db, 'patients', id), data);
+    } catch (e) { console.error(e); }
+  };
+
+  const addSession = async (session: Session) => {
+    if (isDemoMode) {
+       setSessions(prev => [...prev, session]);
+       return;
+    }
+    if (!user || !db) return;
+    try {
+        // Remover ID se vier (Firestore cria)
+        const { id, ...data } = session;
+        await addDoc(collection(db, 'sessions'), {
+            ...data,
+            userId: user.id
+        });
+    } catch (e) { console.error(e); }
+  };
+
+  const updateSession = async (session: Session) => {
+    if (isDemoMode) {
+       setSessions(prev => prev.map(s => s.id === session.id ? session : s));
+       return;
+    }
+    if (!db) return;
+    try {
+        const { id, ...data } = session;
+        await updateDoc(doc(db, 'sessions', id), data);
+    } catch (e) { console.error(e); }
+  };
+
+  const removeSession = async (sessionId: string) => {
+    if (isDemoMode) {
+       setSessions(prev => prev.filter(s => s.id !== sessionId));
+       return;
+    }
+    if (!db) return;
+    try {
+        await deleteDoc(doc(db, 'sessions', sessionId));
+    } catch (e) { console.error(e); }
+  };
+
+  const generateMonthlySessions = (year: number, month: number) => {
+    // Lógica compartilhada: Gera objetos e chama addSession
+    
+    // Simplificação: Apenas gera se não tiver sessões no mês para aquele paciente
+    const start = startOfMonth(new Date(year, month));
+    const end = endOfMonth(new Date(year, month));
+    const daysInMonth = eachDayOfInterval({ start, end });
+
+    patients.forEach(patient => {
+      if (patient.status !== PatientStatus.ACTIVE) return;
+      if (patient.periodicity === Periodicity.SINGLE) return;
+      if (patient.dayOfWeek === undefined) return;
+
       const patientDays = daysInMonth.filter(day => getDay(day) === patient.dayOfWeek);
 
       patientDays.forEach((day, index) => {
         let shouldSchedule = false;
         if (patient.periodicity === Periodicity.WEEKLY) shouldSchedule = true;
         if (patient.periodicity === Periodicity.BIWEEKLY) shouldSchedule = index % 2 === 0;
+        if (patient.periodicity === Periodicity.MONTHLY) shouldSchedule = index === 0;
 
         if (shouldSchedule) {
-          const sessionDate = setMinutes(setHours(day, 9 + (index % 8)), 0); // Random hour 9-17
-          const isPast = isBefore(sessionDate, today);
-          
-          let status = SessionStatus.SCHEDULED;
-          let paid = false;
-
-          if (isPast) {
-            // 80% chance of completed, 10% patient absent, 10% cancelled
-            const rand = Math.random();
-            if (rand > 0.2) status = SessionStatus.COMPLETED;
-            else if (rand > 0.1) status = SessionStatus.PATIENT_ABSENT;
-            else status = SessionStatus.CANCELLED;
-
-            // If completed, 70% chance it's already paid
-            if (status === SessionStatus.COMPLETED && Math.random() > 0.3) {
-              paid = true;
-            }
-          }
-
-          demoSessions.push({
-            id: crypto.randomUUID(),
-            patientId: patient.id,
-            date: sessionDate.toISOString(),
-            status: status,
-            paid: paid,
-            valueSnapshot: patient.valuePerSession
-          });
-        }
-      });
-    });
-
-    return { demoPatients, demoSessions };
-  };
-
-  const login = (email: string, password?: string) => {
-    // Check for demo account
-    if (email === 'teste@teste.com' && password === '123456') {
-      const { demoPatients, demoSessions } = generateDemoData();
-      
-      const newUser = { id: 'demo-user', name: 'Dr. Demonstração', email };
-      setUser(newUser);
-      setPatients(demoPatients);
-      setSessions(demoSessions);
-      
-      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-      localStorage.setItem(STORAGE_KEY_PATIENTS, JSON.stringify(demoPatients));
-      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(demoSessions));
-      
-      return;
-    }
-
-    // Normal mock login
-    const newUser = { id: '1', name: 'Dr. Psicólogo', email };
-    setUser(newUser);
-    localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-  };
-
-  const loginWithGoogle = () => {
-    // Simulated Google Login
-    const newUser = { 
-        id: 'google-user-123', 
-        name: 'Psicólogo Google', 
-        email: 'psico.google@gmail.com',
-        avatarUrl: 'https://lh3.googleusercontent.com/a/default-user=s96-c' // Mock avatar
-    };
-    setUser(newUser);
-    localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-    
-    // Optional: Generate some dummy data if empty
-    if (patients.length === 0) {
-        const { demoPatients, demoSessions } = generateDemoData();
-        setPatients(demoPatients);
-        setSessions(demoSessions);
-    }
-  };
-
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem(STORAGE_KEY_USER);
-  };
-
-  // --- Funções de Cadastro Simulado ---
-
-  const sendVerificationCode = async (contact: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Em um app real, aqui chamaria a API para enviar SMS ou Email
-        // Como é uma demo, mostramos um alerta com o código
-        const mockCode = "123456";
-        alert(`[SIMULAÇÃO] Seu código de verificação para ${contact} é: ${mockCode}`);
-        resolve(true);
-      }, 1500);
-    });
-  };
-
-  const verifyAndRegister = async (code: string, userData: { name: string; contact: string; type: 'EMAIL' | 'PHONE' }): Promise<boolean> => {
-    return new Promise((resolve, reject) => {
-        setTimeout(() => {
-            if (code === "123456") {
-                const newUser: User = {
-                    id: crypto.randomUUID(),
-                    name: userData.name,
-                    email: userData.type === 'EMAIL' ? userData.contact : undefined,
-                    phone: userData.type === 'PHONE' ? userData.contact : undefined
-                };
-                
-                setUser(newUser);
-                localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-                
-                // Inicializa com dados vazios para novo usuário
-                setPatients([]);
-                setSessions([]);
-                
-                resolve(true);
-            } else {
-                resolve(false);
-            }
-        }, 1000);
-    });
-  };
-
-  // ------------------------------------
-
-  const addPatient = (patientData: Omit<Patient, 'id'>) => {
-    const newPatient: Patient = { ...patientData, id: crypto.randomUUID() };
-    setPatients(prev => [...prev, newPatient]);
-  };
-
-  const updatePatient = (updatedPatient: Patient) => {
-    setPatients(prev => prev.map(p => p.id === updatedPatient.id ? updatedPatient : p));
-  };
-
-  const addSession = (session: Session) => {
-    setSessions(prev => [...prev, session]);
-  };
-
-  const updateSession = (updatedSession: Session) => {
-    setSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
-  };
-
-  const removeSession = (sessionId: string) => {
-    setSessions(prev => prev.filter(s => s.id !== sessionId));
-  };
-
-  const generateMonthlySessions = (year: number, month: number) => {
-    // Logic to auto-generate sessions based on periodicity
-    const start = startOfMonth(new Date(year, month));
-    const end = endOfMonth(new Date(year, month));
-    const daysInMonth = eachDayOfInterval({ start, end });
-
-    const newSessions: Session[] = [];
-
-    patients.forEach(patient => {
-      if (patient.status !== PatientStatus.ACTIVE) return;
-      if (patient.periodicity === Periodicity.SINGLE) return; // Handled manually
-      if (patient.dayOfWeek === undefined) return;
-
-      // Filter days that match the patient's day of week
-      const patientDays = daysInMonth.filter(day => getDay(day) === patient.dayOfWeek);
-
-      patientDays.forEach((day, index) => {
-        let shouldSchedule = false;
-
-        if (patient.periodicity === Periodicity.WEEKLY) {
-          shouldSchedule = true;
-        } else if (patient.periodicity === Periodicity.BIWEEKLY) {
-          shouldSchedule = index % 2 === 0; 
-        } else if (patient.periodicity === Periodicity.MONTHLY) {
-          shouldSchedule = index === 0; // First occurrence
-        }
-
-        if (shouldSchedule) {
-          // Check if session already exists for this patient on this day
           const dateStr = format(day, 'yyyy-MM-dd');
-          const exists = sessions.some(s => 
-            s.patientId === patient.id && 
-            s.date.startsWith(dateStr)
-          );
+          // Verifica em memória (o listener do Firestore mantém 'sessions' atualizado)
+          const exists = sessions.some(s => s.patientId === patient.id && s.date.startsWith(dateStr));
 
           if (!exists) {
-            // Default time 10:00 AM if not specified
             const sessionDate = setMinutes(setHours(day, 10), 0);
-            newSessions.push({
-              id: crypto.randomUUID(),
+            addSession({
+              id: 'temp', // Firestore vai gerar
               patientId: patient.id,
               date: sessionDate.toISOString(),
               status: SessionStatus.SCHEDULED,
@@ -298,62 +397,27 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
         }
       });
     });
-
-    if (newSessions.length > 0) {
-      setSessions(prev => [...prev, ...newSessions]);
-    }
   };
 
   const syncGoogleCalendar = () => {
-    // Simulate fetching from Google Calendar API
+    // Mock implementation for UI consistency
     const today = new Date();
     const startOfWeekDate = startOfWeek(today);
-    const mockEvents = [];
-    
-    // Generate 5 mock external events
-    for (let i = 0; i < 5; i++) {
-        const eventDate = addDays(startOfWeekDate, i + 1); // Tue, Wed, Thu...
-        setHours(eventDate, 14 + i); // Different times
+    for (let i = 0; i < 3; i++) {
+        const eventDate = addDays(startOfWeekDate, i + 2); 
+        setHours(eventDate, 15);
         setMinutes(eventDate, 0);
-        
-        // Randomly pick an existing patient name for some, and random stuff for others
-        const isPatientEvent = Math.random() > 0.4;
-        let eventTitle = '';
-        let matchedPatientId = 'unmatched';
-        let estimatedValue = 0;
-
-        if (isPatientEvent && patients.length > 0) {
-            const randomPatient = patients[Math.floor(Math.random() * patients.length)];
-            eventTitle = randomPatient.name; // Exact match simulation
-            matchedPatientId = randomPatient.id;
-            estimatedValue = randomPatient.valuePerSession;
-        } else {
-            const randomTitles = ['Almoço com Mãe', 'Dentista', 'Reunião Escola', 'Academia', 'Consulta Novo Paciente (Marcos)'];
-            eventTitle = randomTitles[Math.floor(Math.random() * randomTitles.length)];
-        }
-
-        mockEvents.push({
-            id: crypto.randomUUID(),
-            patientId: matchedPatientId,
+        addSession({
+            id: 'temp',
+            patientId: 'unmatched',
             date: eventDate.toISOString(),
             status: SessionStatus.UNCONFIRMED,
             paid: false,
-            valueSnapshot: estimatedValue,
-            importedName: eventTitle
+            valueSnapshot: 0,
+            importedName: 'Evento Google Importado'
         });
     }
-
-    // Add only if not overlapping perfectly (simple check)
-    const newImportedSessions = mockEvents.filter(imported => {
-        return !sessions.some(s => s.date === imported.date && s.status !== SessionStatus.UNCONFIRMED);
-    });
-
-    if (newImportedSessions.length > 0) {
-        setSessions(prev => [...prev, ...newImportedSessions]);
-        alert(`${newImportedSessions.length} eventos importados da Agenda Google. Verifique os itens 'A Confirmar'.`);
-    } else {
-        alert("Agenda já está atualizada.");
-    }
+    alert("Sincronização simulada realizada (integração real requer Cloud Functions).");
   };
 
   return (

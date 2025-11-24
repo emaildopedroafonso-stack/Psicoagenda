@@ -1,5 +1,19 @@
 import { GoogleGenAI } from "@google/genai";
 
+// Helper function to safely read environment variables
+const getEnv = (key: string) => {
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+    // @ts-ignore
+    return import.meta.env[key];
+  }
+  // @ts-ignore
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  return undefined;
+};
+
 export const generateFinancialInsight = async (
   month: string,
   totalExpected: number,
@@ -9,10 +23,12 @@ export const generateFinancialInsight = async (
 ): Promise<string> => {
   try {
     // Chave obtida exclusivamente via variável de ambiente, conforme solicitado.
-    const apiKey = process.env.API_KEY;
+    // Tenta ler de várias fontes para garantir compatibilidade
+    const apiKey = getEnv('API_KEY') || getEnv('VITE_API_KEY') || getEnv('REACT_APP_API_KEY');
 
     if (!apiKey) {
-      return "Chave de API não configurada no ambiente.";
+      console.warn("Gemini API Key missing.");
+      return "Configure a API Key para receber insights inteligentes.";
     }
 
     const ai = new GoogleGenAI({ apiKey: apiKey });
