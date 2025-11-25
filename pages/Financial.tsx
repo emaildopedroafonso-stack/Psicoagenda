@@ -3,10 +3,12 @@ import { useAppContext } from '../context/AppContext';
 import { format, isSameMonth, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { SessionStatus } from '../types';
-import { CheckCircle, XCircle, AlertTriangle, FileText } from 'lucide-react';
+import { CheckCircle, AlertTriangle, FileText, Download, DollarSign } from 'lucide-react';
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const Financial = () => {
-  const { sessions, patients, updateSession } = useAppContext();
+  const { sessions, patients, updateSession, user } = useAppContext();
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
 
   const filteredSessions = useMemo(() => {
@@ -29,7 +31,6 @@ const Financial = () => {
 
     filteredSessions.forEach(session => {
       // Include COMPLETED and PATIENT_ABSENT (if charged)
-      // For this MVP, we assume all Patient Absences are charged unless manually cancelled
       if (session.status === SessionStatus.CANCELLED || session.status === SessionStatus.THERAPIST_ABSENT) return;
 
       if (!data[session.patientId]) {
@@ -75,16 +76,96 @@ const Financial = () => {
     }
   };
 
+  const generatePDF = () => {
+    const doc = new jsPDF();
+    const monthName = format(parseISO(selectedMonth + '-01'), 'MMMM yyyy', { locale: ptBR });
+
+    // Header
+    doc.setFontSize(18);
+    doc.setTextColor(13, 148, 136); // Teal-600 color
+    doc.text("Psico-Agenda", 14, 20);
+
+    doc.setFontSize(14);
+    doc.setTextColor(51, 65, 85); // Slate-700
+    doc.text(`Relatório Financeiro Mensal`, 14, 28);
+    doc.setFontSize(12);
+    doc.setTextColor(100);
+    doc.text(`Referência: ${monthName.charAt(0).toUpperCase() + monthName.slice(1)}`, 14, 34);
+
+    doc.setFontSize(10);
+    doc.text(`Psicólogo(a): ${user?.name || 'N/A'}`, 14, 40);
+    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 45);
+
+    // Summary Box
+    doc.setDrawColor(203, 213, 225); // Slate-300
+    doc.setFillColor(248, 250, 252); // Slate-50
+    doc.roundedRect(14, 50, 180, 20, 3, 3, 'FD');
+
+    doc.setFontSize(11);
+    doc.setTextColor(30);
+    doc.text("Resumo:", 20, 63);
+    
+    doc.text(`Esperado: R$ ${totals.total.toFixed(2)}`, 50, 63);
+    
+    doc.setTextColor(22, 163, 74); // Green
+    doc.text(`Recebido: R$ ${totals.paid.toFixed(2)}`, 100, 63);
+    
+    doc.setTextColor(220, 38, 38); // Red
+    doc.text(`Pendente: R$ ${totals.pending.toFixed(2)}`, 150, 63);
+
+    // Table Data preparation
+    const tableBody = filteredSessions
+        .filter(s => s.status !== SessionStatus.CANCELLED && s.status !== SessionStatus.THERAPIST_ABSENT)
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .map(session => {
+            const patient = patients.find(p => p.id === session.patientId);
+            const statusLabel = 
+                session.status === SessionStatus.COMPLETED ? 'Realizada' : 
+                session.status === SessionStatus.PATIENT_ABSENT ? 'Falta Paciente' : 
+                'Agendada';
+            
+            return [
+                format(parseISO(session.date), 'dd/MM HH:mm'),
+                patient?.name || 'Desconhecido',
+                statusLabel,
+                `R$ ${session.valueSnapshot.toFixed(2)}`,
+                session.paid ? 'Sim' : 'Não'
+            ];
+        });
+
+    // Generate Table
+    autoTable(doc, {
+        startY: 75,
+        head: [['Data', 'Paciente', 'Status', 'Valor', 'Pago']],
+        body: tableBody,
+        headStyles: { fillColor: [13, 148, 136] }, // Teal-600
+        alternateRowStyles: { fillColor: [240, 253, 250] }, // Teal-50
+        styles: { fontSize: 9, cellPadding: 3 },
+    });
+
+    doc.save(`Relatorio_Financeiro_${selectedMonth}.pdf`);
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold text-slate-800">Controle Financeiro</h2>
-        <input 
-          type="month" 
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
-        />
+        <div className="flex gap-2 w-full sm:w-auto">
+            <button
+                onClick={generatePDF}
+                className="flex items-center justify-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors shadow-sm text-sm font-medium flex-1 sm:flex-none"
+                title="Baixar PDF"
+            >
+                <Download size={18} />
+                Relatório PDF
+            </button>
+            <input 
+            type="month" 
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 w-full sm:w-auto"
+            />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -111,74 +192,61 @@ const Financial = () => {
                 {record.pending === 0 && record.total > 0 && (
                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold">Pago Total</span>
                 )}
-                {record.pending > 0 && (
-                   <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-bold">Pendente</span>
-                )}
                 {record.requiresReceipt && record.paid > 0 && (
-                  <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-indigo-100">
-                    <FileText size={12} /> Recibo Necessário
-                  </span>
+                    <span className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full font-bold border border-indigo-100">
+                        <FileText size={12} /> Emitir Recibo
+                    </span>
                 )}
               </div>
               <div className="text-sm">
-                <span className="text-slate-500">A Receber: </span>
-                <span className="font-bold text-slate-800">R$ {record.pending.toFixed(2)}</span>
+                <span className="text-slate-500">Pendente: </span>
+                <span className={`font-bold ${record.pending > 0 ? 'text-red-600' : 'text-slate-700'}`}>
+                   R$ {record.pending.toFixed(2)}
+                </span>
               </div>
             </div>
             
-            <div className="p-4 overflow-x-auto">
-              <table className="w-full text-sm text-left">
-                <thead>
-                  <tr className="text-slate-500 border-b border-slate-100">
-                    <th className="pb-2">Data</th>
-                    <th className="pb-2">Status</th>
-                    <th className="pb-2">Valor</th>
-                    <th className="pb-2 text-center">Pagamento</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {record.sessions.sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map(session => (
-                    <tr key={session.id} className="border-b border-slate-50 last:border-0">
-                      <td className="py-3">{format(new Date(session.date), "dd/MM/yyyy HH:mm")}</td>
-                      <td className="py-3">
-                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                          session.status === SessionStatus.COMPLETED ? 'bg-green-100 text-green-700' :
-                          session.status === SessionStatus.PATIENT_ABSENT ? 'bg-red-100 text-red-700' :
-                          'bg-blue-100 text-blue-700'
-                        }`}>
-                          {session.status === SessionStatus.COMPLETED ? 'Realizada' :
-                           session.status === SessionStatus.PATIENT_ABSENT ? 'Falta' : 'Agendada'}
-                        </span>
-                      </td>
-                      <td className="py-3 text-slate-700">R$ {session.valueSnapshot.toFixed(2)}</td>
-                      <td className="py-3 text-center">
-                        {session.status !== SessionStatus.SCHEDULED && (
-                          <button 
-                            onClick={() => togglePaid(session.id, session.paid)}
-                            className={`p-1 rounded-full transition-colors ${
-                              session.paid 
-                                ? 'text-green-500 hover:bg-green-50' 
-                                : 'text-slate-300 hover:text-slate-500 hover:bg-slate-100'
-                            }`}
-                            title={session.paid ? "Marcar como não pago" : "Marcar como pago"}
-                          >
-                            {session.paid ? <CheckCircle size={20} fill="currentColor" className="text-white" /> : <CheckCircle size={20} />}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="divide-y divide-slate-100">
+              {record.sessions.map(session => (
+                <div key={session.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">
+                      {format(parseISO(session.date), "dd/MM 'às' HH:mm")}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        session.status === SessionStatus.COMPLETED ? 'bg-green-100 text-green-700' :
+                        session.status === SessionStatus.PATIENT_ABSENT ? 'bg-red-100 text-red-700' :
+                        'bg-slate-100 text-slate-500'
+                      }`}>
+                        {session.status === SessionStatus.COMPLETED ? 'Realizada' : 
+                         session.status === SessionStatus.PATIENT_ABSENT ? 'Falta' : 'Agendada'}
+                      </span>
+                      <span className="text-xs text-slate-500">R$ {session.valueSnapshot}</span>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    onClick={() => togglePaid(session.id, session.paid)}
+                    className={`p-2 rounded-full transition-all ${
+                      session.paid 
+                      ? 'bg-green-500 text-white shadow-md hover:bg-green-600' 
+                      : 'bg-slate-100 text-slate-300 hover:bg-green-100 hover:text-green-500'
+                    }`}
+                    title={session.paid ? "Marcar como não pago" : "Marcar como pago"}
+                  >
+                    <DollarSign size={20} />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         ))}
 
         {financialData.length === 0 && (
-          <div className="text-center py-12 text-slate-500 bg-white rounded-xl border border-slate-200 border-dashed">
-            <AlertTriangle className="mx-auto mb-2 opacity-20" size={40} />
-            Nenhum registro financeiro para este mês.
-          </div>
+            <div className="text-center py-12 text-slate-400">
+                Nenhuma sessão registrada neste mês.
+            </div>
         )}
       </div>
     </div>
